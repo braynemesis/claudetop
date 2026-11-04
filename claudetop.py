@@ -29,7 +29,7 @@ import time
 import unicodedata
 from urllib.parse import quote
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 CLAUDE_BIN = os.environ.get("CLAUDETOP_CLAUDE_BIN") or "claude"
 CACHE_DIR = os.path.expanduser(os.environ.get("CLAUDETOP_CACHE_DIR") or "~/.cache/claudetop")

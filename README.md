@@ -23,11 +23,12 @@ STATE  NAME                            MODEL      CTX        TOKENS    AGE  FAN 
 ### Homebrew
 
 ```bash
-brew tap braynemesis/claudetop
-brew install claudetop
+brew install braynemesis/claudetop/claudetop
 ```
 
-A fórmula instala o CLI isolado no prefixo do Homebrew e depende de `python@3.14`. Para atualizar: `brew upgrade claudetop`.
+O nome completo já adiciona o tap. A fórmula instala o CLI isolado no prefixo do Homebrew e depende de `python@3.14`. Para atualizar: `brew upgrade claudetop`.
+
+No Homebrew 7, instalar pelo nome curto (`brew tap braynemesis/claudetop && brew install claudetop`) pede que o tap seja confiável: rode `brew trust braynemesis/claudetop` antes.
 
 ### Manual
 
