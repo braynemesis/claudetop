@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claudetop"
+dynamic = ["version"]
+description = "Monitor htop-style de agentes Claude Code (lead + subagentes, tokens, ctx, jobs)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = ['windows-curses; sys_platform == "win32"']
+classifiers = [
+    "Environment :: Console :: Curses",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+]
+
+[project.scripts]
+claudetop = "claudetop:main"
+
+[tool.setuptools]
+py-modules = ["claudetop"]
+
+[tool.setuptools.dynamic]
+version = { attr = "claudetop.VERSION" }

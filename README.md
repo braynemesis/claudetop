@@ -2,7 +2,7 @@
 
 Monitor estilo `htop` para **agentes do Claude Code** — sessões, jobs em background e swarms de subagentes — em tempo real, direto no terminal.
 
-Lê apenas estado local (`~/.claude`), não faz rede, não precisa de GUI nem de dependências (Python 3 + `curses`).
+Lê apenas estado local (`~/.claude`), não faz rede, não precisa de GUI nem de dependências (Python 3 + `curses`; no Windows, `windows-curses`, instalado automaticamente pelo pipx).
 
 ![claudetop — monitor de agentes do Claude Code no terminal](docs/screenshot-demo.png)
 
@@ -31,6 +31,14 @@ brew install claudetop
 Depois disso: `brew upgrade claudetop` e `brew uninstall claudetop`. A fórmula instala o CLI isolado no prefixo do Homebrew, depende de `python@3.14` e mostra os atalhos ao final da instalação.
 
 Se preferir um comando único (sem `tap`/`trust`): `brew install braynemesis/claudetop/claudetop`.
+
+### Linux e Windows (pipx)
+
+```bash
+pipx install git+https://github.com/braynemesis/claudetop
+```
+
+No Windows o `windows-curses` vem como dependência. Terminais suportados para `o`: `x-terminal-emulator`, `gnome-terminal`, `konsole`, `kitty`, `wezterm`, `xterm` (Linux) e Windows Terminal / `cmd` (Windows); use `CLAUDETOP_OPEN` para outro. Suporte a Linux/Windows é novo: relate problemas.
 
 ### Manual
 

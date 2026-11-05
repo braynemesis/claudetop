@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import calendar
-import curses
 import glob
 import json
 import os
@@ -29,10 +28,28 @@ import time
 import unicodedata
 from urllib.parse import quote
 
-VERSION = "0.1.2"
+try:
+    import curses
+except ImportError:  # Windows sem windows-curses: --once/--json seguem funcionando
+    curses = None
+
+IS_WIN = sys.platform == "win32"
+
+VERSION = "0.2.1"
 
 CLAUDE_BIN = os.environ.get("CLAUDETOP_CLAUDE_BIN") or "claude"
-CACHE_DIR = os.path.expanduser(os.environ.get("CLAUDETOP_CACHE_DIR") or "~/.cache/claudetop")
+
+
+def default_cache_dir():
+    """macOS mantém ~/.cache; Linux respeita XDG_CACHE_HOME; Windows usa LOCALAPPDATA."""
+    if IS_WIN:
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
+    else:
+        base = os.environ.get("XDG_CACHE_HOME") or "~/.cache"
+    return os.path.join(base, "claudetop")
+
+
+CACHE_DIR = os.path.expanduser(os.environ.get("CLAUDETOP_CACHE_DIR") or default_cache_dir())
 
 CLAUDE_DIR = (
     os.environ.get("CLAUDETOP_CLAUDE_DIR")
@@ -688,7 +705,7 @@ class Scanner:
                 sid=fname[6:-6],
                 label=clean_text(label, 90),
                 model=scan.model or "",
-                started=scan.first_ts or st.st_birthtime,
+                started=scan.first_ts or getattr(st, "st_birthtime", st.st_mtime),
                 done=scan.last_ts if state == "done" else None,
                 status=state,
                 tokens=scan.tok_in + scan.tok_out + scan.tok_cw,
@@ -1262,8 +1279,11 @@ def repo_url(agent, kind="branch"):
 def open_url(url):
     if os.environ.get("CLAUDETOP_OPEN_DRY"):
         return True, ""
-    opener = "open" if sys.platform == "darwin" else "xdg-open"
     try:
+        if IS_WIN:
+            os.startfile(url)
+            return True, ""
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
         subprocess.Popen([opener, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as exc:
         return False, str(exc)
@@ -1393,12 +1413,31 @@ end run
 }
 TERMINAL_NAMES = {"terminal": "Terminal.app", "iterm": "iTerm2"}
 
+# fora do macOS: (binario, template); a ordem e a preferencia de deteccao.
+# {qcmd} = comando ja citado; no Windows `cmd /s` remove so as aspas externas de {cmd}.
+if IS_WIN:
+    TERMINAL_TEMPLATES = {
+        "wt": ("wt.exe", 'wt.exe cmd /s /k "{cmd}"'),
+        "cmd": ("cmd.exe", 'start "" cmd /s /k "{cmd}"'),
+    }
+else:
+    TERMINAL_TEMPLATES = {
+        "x-terminal-emulator": ("x-terminal-emulator", "x-terminal-emulator -e sh -c {qcmd}"),
+        "gnome-terminal": ("gnome-terminal", "gnome-terminal -- sh -c {qcmd}"),
+        "konsole": ("konsole", "konsole -e sh -c {qcmd}"),
+        "kitty": ("kitty", "kitty sh -c {qcmd}"),
+        "wezterm": ("wezterm", "wezterm start -- sh -c {qcmd}"),
+        "xterm": ("xterm", "xterm -e sh -c {qcmd}"),
+    }
+
 
 def detect_terminal():
     """Terminal usado por `o`. CLAUDETOP_OPEN aceita 'terminal', 'iterm' ou um template com {cmd}."""
     override = (os.environ.get("CLAUDETOP_OPEN") or "").strip()
     if override:
         return override
+    if sys.platform != "darwin":
+        return next((k for k, (exe, _) in TERMINAL_TEMPLATES.items() if shutil.which(exe)), "")
     prog = os.environ.get("TERM_PROGRAM", "")
     if prog in ("iTerm.app", "iTerm2"):
         return "iterm"
@@ -1409,30 +1448,51 @@ def detect_terminal():
     return "terminal"
 
 
+def shq(text):
+    """Cita um argumento para o shell do SO (cmd.exe: sempre entre aspas duplas)."""
+    return f'"{text}"' if IS_WIN else shlex.quote(text)
+
+
+def safe_id(text):
+    """Ids vem de arquivos em ~/.claude: so [A-Za-z0-9_-] entra num comando de shell."""
+    return re.sub(r"[^A-Za-z0-9_-]", "", text or "")
+
+
+def cd_cmd(cwd):
+    # o cmd externo le o caminho fora das aspas e expande %var%: allowlist, senao cai no home
+    if IS_WIN:
+        if not re.fullmatch(r"[\w \-.:\\/()]+", cwd):
+            cwd = os.path.expanduser("~")
+        return f"cd /d {shq(cwd)}"
+    return f"cd {shlex.quote(cwd)}"
+
+
 def resume_command(agent):
     """Comando de shell que reabre a sessão do agente no diretório dele."""
-    sid = (agent.session_id or "").strip()
+    sid = safe_id((agent.session_id or "").strip())
     cwd = (agent.cwd or "").strip() or os.path.expanduser("~")
-    parts = [f"cd {shlex.quote(cwd)}"]
-    parts.append(f"claude --resume {shlex.quote(sid)}" if sid else "claude")
+    parts = [cd_cmd(cwd)]
+    parts.append(f"claude --resume {shq(sid)}" if sid else "claude")
     return " && ".join(parts)
 
 
 def attach_command(agent):
     """Job em background: `claude attach` (retoma com o output ao vivo)."""
     cwd = (agent.cwd or "").strip() or os.path.expanduser("~")
-    return f"cd {shlex.quote(cwd)} && claude attach {shlex.quote(agent.short)}"
+    return f"{cd_cmd(cwd)} && claude attach {shq(safe_id(agent.short))}"
 
 
 def logs_command(agent):
     cwd = (agent.cwd or "").strip() or os.path.expanduser("~")
-    return f"cd {shlex.quote(cwd)} && claude logs {shlex.quote(agent.short)}"
+    return f"{cd_cmd(cwd)} && claude logs {shq(safe_id(agent.short))}"
 
 
 def open_in_terminal(cmd, terminal=None):
     """Abre `cmd` num terminal novo. Retorna (ok, erro, nome_do_terminal)."""
     terminal = terminal or detect_terminal()
     name = TERMINAL_NAMES.get(terminal, terminal)
+    if not terminal:
+        return False, "nenhum terminal encontrado (defina CLAUDETOP_OPEN)", name
     if os.environ.get("CLAUDETOP_OPEN_DRY"):
         return True, "", f"{name} (dry-run)"
 
@@ -1448,7 +1508,8 @@ def open_in_terminal(cmd, terminal=None):
 
     # template customizado: {cmd} = linha pronta para um shell; {qcmd} = a mesma linha
     # ja citada, para terminais que recebem o comando como um unico argumento
-    script = terminal.replace("{qcmd}", shlex.quote(cmd)).replace("{cmd}", cmd)
+    script = TERMINAL_TEMPLATES.get(terminal, (None, terminal))[1]
+    script = script.replace("{qcmd}", shlex.quote(cmd)).replace("{cmd}", cmd)
     try:
         proc = subprocess.run(script, shell=True,
                               capture_output=True, text=True, timeout=20)
@@ -1457,6 +1518,18 @@ def open_in_terminal(cmd, terminal=None):
     if proc.returncode == 0:
         return True, "", name
     return False, (proc.stderr or "").strip(), name
+
+
+def clipboard_cmd(text):
+    """(argv, bytes) do utilitário de clipboard do SO; argv vazio se não houver nenhum."""
+    if sys.platform == "darwin":
+        return ["pbcopy"], text.encode()
+    if IS_WIN:
+        return ["clip"], text.encode("utf-16")
+    for argv in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "-ib"]):
+        if shutil.which(argv[0]):
+            return argv, text.encode()
+    return [], b""
 
 
 # ---------------------------------------------------------------- TUI
@@ -2183,11 +2256,15 @@ class TUI:
             pass
 
     def copy(self, text, label="caminho copiado"):
+        argv, data = clipboard_cmd(text)
+        if not argv:
+            self.flash("clipboard indisponível")
+            return
         try:
-            subprocess.run(["pbcopy"], input=text.encode(), check=False, timeout=2)
+            subprocess.run(argv, input=data, check=False, timeout=2)
             self.flash(label)
         except (OSError, subprocess.SubprocessError):
-            self.flash("pbcopy indisponível")
+            self.flash(f"{argv[0]} indisponível")
 
     def confirm(self, token, label):
         """Acao destrutiva: exige o mesmo toque duas vezes em 4s."""
@@ -2373,6 +2450,10 @@ def main(argv=None):
                        prefs.pinned, prefs.hidden))
         return 0
 
+    if curses is None:
+        print("claudetop: curses indisponível (no Windows: pip install windows-curses); "
+              "use --once ou --json", file=sys.stderr)
+        return 1
     tui = TUI(scanner, args)
     curses.wrapper(tui.loop)
     return 0
